@@ -1644,6 +1644,7 @@ class CubicSupercellTransformation(AbstractTransformation):
         max_atoms: Optional[int] = None,
         min_length: float = 15.,
         force_diagonal: bool = False,
+        square: bool = False,
     ):
         """
         Args:
@@ -1652,12 +1653,15 @@ class CubicSupercellTransformation(AbstractTransformation):
             min_length: Minimum length of the smallest supercell lattice vector.
             force_diagonal: If True, return a transformation with a diagonal
                 transformation matrix.
+            square: If True, will return a nearly square supercell, with c lattice
+            parameter unchanged.
         """
         self.min_atoms = min_atoms if min_atoms else -np.Inf
         self.max_atoms = max_atoms if max_atoms else np.Inf
         self.min_length = min_length
         self.force_diagonal = force_diagonal
         self.transformation_matrix = None
+        self.square = square
 
     def apply_transformation(self, structure: Structure) -> Structure:
         """
@@ -1691,9 +1695,15 @@ class CubicSupercellTransformation(AbstractTransformation):
         target_sc_size = self.min_length
         while sc_not_found:
             target_sc_lat_vecs = np.eye(3, 3) * target_sc_size
+            if self.square:
+                target_sc_lat_vecs[-1, -1] = 1
+
             self.transformation_matrix = (
                     target_sc_lat_vecs @ np.linalg.inv(lat_vecs)
             )
+
+            if self.square:
+                print(self.square, target_sc_lat_vecs, self.transformation_matrix)
 
             # round the entries of T and force T to be nonsingular
             self.transformation_matrix = _round_and_make_arr_singular(
@@ -1707,22 +1717,29 @@ class CubicSupercellTransformation(AbstractTransformation):
             b = proposed_sc_lat_vecs[1]
             c = proposed_sc_lat_vecs[2]
 
-            length1_vec = c - _proj(c, a)  # a-c plane
-            length2_vec = a - _proj(a, c)
-            length3_vec = b - _proj(b, a)  # b-a plane
-            length4_vec = a - _proj(a, b)
-            length5_vec = b - _proj(b, c)  # b-c plane
-            length6_vec = c - _proj(c, b)
-            length_vecs = np.array(
-                [
-                    length1_vec,
-                    length2_vec,
-                    length3_vec,
-                    length4_vec,
-                    length5_vec,
-                    length6_vec,
-                ]
-            )
+            if not self.square:
+
+                length_vecs = np.array(
+                    [
+                        c - _proj(c, a),  # a-c plane
+                        a - _proj(a, c),
+                        b - _proj(b, a),  # b-a plane
+                        a - _proj(a, b),
+                        b - _proj(b, c),  # b-c plane
+                        c - _proj(c, b),
+                    ]
+                )
+
+            else:
+
+                # in square case, only need to consider b-a plane
+
+                length_vecs = np.array(
+                    [
+                        b - _proj(b, a),  # b-a plane
+                        a - _proj(a, b),
+                    ]
+                )
 
             # Get number of atoms
             st = SupercellTransformation(self.transformation_matrix)
@@ -1753,6 +1770,7 @@ class CubicSupercellTransformation(AbstractTransformation):
             None
         """
         return None
+
 
     @property
     def is_one_to_many(self):
@@ -1895,8 +1913,14 @@ def _round_and_make_arr_singular(arr: np.ndarray) -> np.ndarray:
 
     arr_rounded = np.around(arr)
 
+    rows_to_fix = {}
+    num_rows_to_try = 0
+
     # Zero rows in 'arr_rounded' make the array singular, so force zero rows to
-    # be nonzero
+    # be nonzero, first we find the rows we can change -- in the case of multiple
+    # equivalently weighted rows, we try them sequentially until the array is no
+    # longer singular (previous version of this code broke ties randomly, but this
+    # still sometimes resulted in singular matrices)
     if (~arr_rounded.any(axis=1)).any():
         # Check for zero rows in T_rounded
 
@@ -1911,29 +1935,45 @@ def _round_and_make_arr_singular(arr: np.ndarray) -> np.ndarray:
             matches = np.absolute(zero_row) == np.amax(np.absolute(zero_row))
             col_idx_to_fix = np.where(matches)[0]
 
+            rows_to_fix[zero_row_idx] = col_idx_to_fix
+            num_rows_to_try = max([num_rows_to_try, len(col_idx_to_fix)])
+
+    def make_nonsingular(arr_rounded, idx):
+
+        for zero_row_idx, r_idxs in rows_to_fix.items():
+
+            arr_rounded = arr_rounded.copy()
+
             # Break ties for the largest absolute magnitude
-            r_idx = np.random.randint(len(col_idx_to_fix))
-            col_idx_to_fix = col_idx_to_fix[r_idx]
+            col_idx_to_fix = r_idxs[min([len(r_idxs), idx])]
 
             # Round the chosen element away from zero
             arr_rounded[zero_row_idx, col_idx_to_fix] = round_away_from_zero(
                 arr[zero_row_idx, col_idx_to_fix]
             )
 
-    # Repeat process for zero columns
-    if (~arr_rounded.any(axis=0)).any():
+        # Repeat process for zero columns
+        if (~arr_rounded.any(axis=0)).any():
 
-        # Check for zero columns in T_rounded
-        zero_col_idxs = np.where(~arr_rounded.any(axis=0))[0]
-        for zero_col_idx in zero_col_idxs:
-            zero_col = arr[:, zero_col_idx]
-            matches = np.absolute(zero_col) == np.amax(np.absolute(zero_col))
-            row_idx_to_fix = np.where(matches)[0]
+            # Check for zero columns in T_rounded
+            zero_col_idxs = np.where(~arr_rounded.any(axis=0))[0]
+            for zero_col_idx in zero_col_idxs:
+                zero_col = arr[:, zero_col_idx]
+                matches = np.absolute(zero_col) == np.amax(np.absolute(zero_col))
+                row_idx_to_fix = np.where(matches)[0]
 
-            for i in row_idx_to_fix:
-                arr_rounded[i, zero_col_idx] = round_away_from_zero(
-                    arr[i, zero_col_idx]
-                )
+                for i in row_idx_to_fix:
+                    arr_rounded[i, zero_col_idx] = round_away_from_zero(
+                        arr[i, zero_col_idx]
+                    )
+
+        return arr_rounded
+
+    for idx in range(num_rows_to_try):
+        arr_rounded = make_nonsingular(arr_rounded, idx)
+        if np.linalg.det(arr_rounded) != 0:
+            break
+
     return arr_rounded.astype(int)
 
 

@@ -685,6 +685,17 @@ class CubicSupercellTransformationTest(PymatgenTest):
             np.eye(3) * 4
         )
 
+        # Test square output
+        square_generator = CubicSupercellTransformation(
+            min_atoms=min_atoms,
+            max_atoms=max_atoms,
+            square=True
+        )
+        square_structure = square_generator.apply_transformation(structure2)
+        square_structure.to(filename="square.cif")
+        self.assertArrayAlmostEqual(square_structure.lattice.parameters,
+                                    [27.154305, 27.154305, 3.8401986, 45., 90., 90.])
+
 
 class AddAdsorbateTransformationTest(PymatgenTest):
 
