@@ -457,28 +457,28 @@ class PWInput:
                 structure_params = {"ibrav": 7, "C": lattice.c}
         elif crystal_system == "orthorhombic":
             if lattice_symbol == "P":
-                structure_params = {"ibrav": 8, "B": lattice.B, "C": lattice.c}
+                structure_params = {"ibrav": 8, "B": lattice.b, "C": lattice.c}
             elif lattice_symbol == "C":
-                structure_params = {"ibrav": 9, "B": lattice.B, "C": lattice.c}
+                structure_params = {"ibrav": 9, "B": lattice.b, "C": lattice.c}
             elif lattice_symbol == "A":
-                structure_params = {"ibrav": 91, "B": lattice.B, "C": lattice.c}
+                structure_params = {"ibrav": 91, "B": lattice.b, "C": lattice.c}
             elif lattice_symbol == "F":
-                structure_params = {"ibrav": 10, "B": lattice.B, "C": lattice.c}
+                structure_params = {"ibrav": 10, "B": lattice.b, "C": lattice.c}
             elif lattice_symbol == "I":
-                structure_params = {"ibrav": 11, "B": lattice.B, "C": lattice.c}
+                structure_params = {"ibrav": 11, "B": lattice.b, "C": lattice.c}
         elif crystal_system == "monoclinic":
             if lattice_symbol == "P":
                 if sga._space_group_data['choice'][0] == "c":
-                    structure_params = {"ibrav": 12, "B": lattice.B, "C": lattice.C, "cosAB": cos(lattice.gamma)}
+                    structure_params = {"ibrav": 12, "B": lattice.b, "C": lattice.c, "cosAB": cos(lattice.gamma)}
                 if sga._space_group_data['choice'][0] == "b":
-                    structure_params = {"ibrav": -12, "B": lattice.B, "C": lattice.C, "cosAC": cos(lattice.beta)}
+                    structure_params = {"ibrav": -12, "B": lattice.b, "C": lattice.c, "cosAC": cos(lattice.beta)}
             elif lattice_symbol == "C":
                 if sga._space_group_data['choice'][0] == "c":
-                    structure_params = {"ibrav": 13, "B": lattice.B, "C": lattice.C, "cosAB": cos(lattice.gamma)}
+                    structure_params = {"ibrav": 13, "B": lattice.b, "C": lattice.c, "cosAB": cos(lattice.gamma)}
                 if sga._space_group_data['choice'][0] == "b":
-                    structure_params = {"ibrav": -13, "B": lattice.B, "C": lattice.C, "cosAC": cos(lattice.beta)}
+                    structure_params = {"ibrav": -13, "B": lattice.b, "C": lattice.c, "cosAC": cos(lattice.beta)}
         elif crystal_system == "triclinic":
-            structure_params = {"ibrav": 14, "B": lattice.B, "C": lattice.C, 
+            structure_params = {"ibrav": 14, "B": lattice.b, "C": lattice.c,
                                 "cosAB": cos(lattice.gamma), "cosAC": cos(lattice.beta), "cosBC": cos(lattice.alpha)}
         return structure_params
 
