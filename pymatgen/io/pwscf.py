@@ -13,10 +13,15 @@ from collections import defaultdict
 from monty.io import zopen
 from monty.re import regrep
 
+from numpy import cos, isclose
+from numpy.linalg import det
+from spglib import get_symmetry_dataset
+
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.structure import Structure
 from pymatgen.util.io_utils import clean_lines
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 
 class PWInput:
@@ -27,7 +32,8 @@ class PWInput:
 
     def __init__(self, structure, pseudo=None, control=None, system=None,
                  electrons=None, ions=None, cell=None, kpoints_mode="automatic",
-                 kpoints_grid=(1, 1, 1), kpoints_shift=(0, 0, 0)):
+                 kpoints_grid=(1, 1, 1), kpoints_shift=(0, 0, 0),
+                 atomic_positions_mode="crystal_sg"):
         """
         Initializes a PWSCF input file.
 
@@ -78,6 +84,11 @@ class PWInput:
         self.kpoints_grid = kpoints_grid
         self.kpoints_shift = kpoints_shift
 
+        self.atomic_positions_mode = atomic_positions_mode
+        sga = SpacegroupAnalyzer(structure)
+        self.space_group = sga.get_space_group_number()
+        self.symmetrized_structure = sga.get_symmetrized_structure()
+
     def __str__(self):
         out = []
         site_descriptions = {}
@@ -122,9 +133,15 @@ class PWInput:
                     sub.append("  %s = %s" % (k2, to_str(v1[k2])))
             if k1 == "system":
                 if 'ibrav' not in self.sections[k1]:
-                    sub.append("  ibrav = 0")
+                    if self.atomic_positions_mode == "crystal_cg":
+                        sub.append("  space_group = %d" % self.space_group)
+                    else:
+                        sub.append("  ibrav = 0")
                 if 'nat' not in self.sections[k1]:
-                    sub.append("  nat = %d" % len(self.structure))
+                    if self.atomic_positions_mode == "crystal_cg":
+                        sub.append("  nat = %d" % len(self.symmetrized_structure.equivalent_sites))
+                    else:
+                        sub.append("  nat = %d" % len(self.structure))
                 if 'ntyp' not in self.sections[k1]:
                     sub.append("  ntyp = %d" % len(site_descriptions))
             sub.append("/")
@@ -139,19 +156,27 @@ class PWInput:
                 p = v['pseudo']
             out.append("  %s  %.4f %s" % (k, Element(e).atomic_mass, p))
 
-        out.append("ATOMIC_POSITIONS crystal")
-        if self.pseudo is not None:
-            for site in self.structure:
-                out.append("  %s %.6f %.6f %.6f" % (site.specie.symbol, site.a,
-                                                    site.b, site.c))
+        if self.atomic_positions_mode == "crystal_sg":
+            out.append("ATOMIC_POSITIONS crystal_sg")
+            sga = SpacegroupAnalyzer(self.structure)
+            ss = sga.get_symmetrized_structure()
+            for i, sites in enumerate(ss.equivalent_sites):
+                site = sites[0]
+                out.append(" %s %.6f %.6f %.6f" % (site.species_string, *site.frac_coords))
         else:
-            for site in self.structure:
-                name = None
-                for k, v in sorted(site_descriptions.items(),
-                                   key=lambda i: i[0]):
-                    if v == site.properties:
-                        name = k
-                out.append("  %s %.6f %.6f %.6f" % (name, site.a, site.b, site.c))
+            out.append("ATOMIC_POSITIONS crystal")
+            if self.pseudo is not None:
+                for site in self.structure:
+                    out.append("  %s %.6f %.6f %.6f" % (site.specie.symbol, site.a,
+                                                        site.b, site.c))
+            else:
+                for site in self.structure:
+                    name = None
+                    for k, v in sorted(site_descriptions.items(),
+                                    key=lambda i: i[0]):
+                        if v == site.properties:
+                            name = k
+                    out.append("  %s %.6f %.6f %.6f" % (name, site.a, site.b, site.c))
 
         out.append("K_POINTS %s" % self.kpoints_mode)
         kpt_str = ["%s" % i for i in self.kpoints_grid]
@@ -386,6 +411,82 @@ class PWInput:
         m = re.match(r"^[\"|'](.+)[\"|']$", val)
         if m:
             return m.group(1)
+
+    @staticmethod
+    def ibrav(structure, symprec=0.01, angle_tolerance=5.0):
+        """
+        Static helper method to get the proper ibrav parameter.
+
+        Args:
+            structure: Structure
+        """
+        sga = SpacegroupAnalyzer(structure, symprec=symprec, angle_tolerance=angle_tolerance)
+        primitive_structure = sga.get_refined_structure()
+        lattice = primitive_structure.lattice
+        crystal_system = sga.get_crystal_system()
+        lattice_symbol = sga.get_space_group_symbol()[0]
+
+        structure_params = {"ibrav": 0, "A": lattice.a}
+
+        if crystal_system == "cubic":
+            if lattice_symbol == "P":
+                structure_params["ibrav"] = 1
+            elif lattice_symbol == "F":
+                structure_params["ibrav"] = 2
+            elif lattice_symbol == "I":
+                structure_params["ibrav"] = -3
+        elif crystal_system == "hexagonal":
+            structure_params = {"ibrav": 4, "C": lattice.c}
+        elif crystal_system == "trigonal":
+            if lattice_symbol == "P":
+                structure_params = {"ibrav": 4, "C": lattice.c}
+            elif lattice_symbol == "R":
+                # using SpacegroupAnalyzer._space_group_data, always the first one
+                # among possible choices and settings is chosen as default.
+                h_choice_dataset = get_symmetry_dataset(sga._cell, symprec=symprec, angle_tolerance=angle_tolerance)
+                r_choice_dataset = get_symmetry_dataset(sga._cell, symprec=symprec, angle_tolerance=angle_tolerance,
+                                                        hall_number=h_choice_dataset['hall_number']+1)
+                if isclose(h_choice_dataset['transformation_matrix'], 1.0):
+                    structure_params = {"ibrav": 5, "cosAB": cos(lattice.gamma)}
+                elif isclose(r_choice_dataset['transformation_matrix'], 1.0):
+                    structure_params = {"ibrav": -5, "cosAB": cos(lattice.gamma)}
+        elif crystal_system == "tetragonal":
+            if lattice_symbol == "P":
+                structure_params = {"ibrav": 6, "C": lattice.c}
+            elif lattice_symbol == "I":
+                structure_params = {"ibrav": 7, "C": lattice.c}
+        elif crystal_system == "orthorhombic":
+            if lattice_symbol == "P":
+                structure_params = {"ibrav": 8, "B": lattice.B, "C": lattice.c}
+            elif lattice_symbol == "C":
+                structure_params = {"ibrav": 9, "B": lattice.B, "C": lattice.c}
+            elif lattice_symbol == "A":
+                structure_params = {"ibrav": 91, "B": lattice.B, "C": lattice.c}
+            elif lattice_symbol == "F":
+                structure_params = {"ibrav": 10, "B": lattice.B, "C": lattice.c}
+            elif lattice_symbol == "I":
+                structure_params = {"ibrav": 11, "B": lattice.B, "C": lattice.c}
+        elif crystal_system == "monoclinic":
+            if lattice_symbol == "P":
+                if sga._space_group_data['choice'][0] == "c":
+                    structure_params = {"ibrav": 12, "B": lattice.B, "C": lattice.C, "cosAB": cos(lattice.gamma)}
+                if sga._space_group_data['choice'][0] == "b":
+                    structure_params = {"ibrav": -12, "B": lattice.B, "C": lattice.C, "cosAC": cos(lattice.beta)}
+            elif lattice_symbol == "C":
+                if sga._space_group_data['choice'][0] == "c":
+                    structure_params = {"ibrav": 13, "B": lattice.B, "C": lattice.C, "cosAB": cos(lattice.gamma)}
+                if sga._space_group_data['choice'][0] == "b":
+                    structure_params = {"ibrav": -13, "B": lattice.B, "C": lattice.C, "cosAC": cos(lattice.beta)}
+        elif crystal_system == "triclinic":
+            structure_params = {"ibrav": 14, "B": lattice.B, "C": lattice.C, 
+                                "cosAB": cos(lattice.gamma), "cosAC": cos(lattice.beta), "cosBC": cos(lattice.alpha)}
+        return structure_params
+
+    @staticmethod
+    def wyckoff_positions(structure):
+        sga = SpacegroupAnalyzer(structure)
+        ss = sga.get_symmetrized_structure()
+        
 
 
 class PWInputError(BaseException):
