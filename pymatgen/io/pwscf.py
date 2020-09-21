@@ -428,6 +428,39 @@ class PWOutput:
             else:
                 self.data[k] = float(v[0][0][0])
 
+        gen = zopen(filename, "rt")
+        read_final_structure = False
+        cell_parameters_pattern = re.compile(r"^\s+(-?[\d\.]+\s+-?[\d\.]+\s+-?[\d\.]+)\s+")
+        atomic_positions_pattern = re.compile(r"^([A-Z][a-z]?\s+-?[\d\.]+\s+-?[\d\.]+\s+-?[\d\.]+)\s+")
+
+        lattice = []
+        species = []
+        coords = []
+        for i, l in enumerate(gen):
+            if l == "Begin final coordinates\n":
+                read_final_structure = True
+            if l == "End final coordinates\n":
+                read_final_structure = False
+                break
+            if read_final_structure:
+                m = cell_parameters_pattern.search(l)
+                if m:
+                    lattice.append([list(map(float, m.groups()[0].split()))])
+                    continue
+
+                m = atomic_positions_pattern.search(l)
+                if m:
+                    e, *p = m.groups()[0].split()
+                    species.append(e)
+                    coords.append(list(map(float, p)))
+        try:
+            gen.close()
+        except Exception:
+            pass
+
+        if lattice != [] and species != [] and coords != []:
+            self.final_structure = Structure(lattice=lattice, species=species, coords=coords)
+
     def read_pattern(self, patterns, reverse=False,
                      terminate_on_match=False, postprocess=str):
         r"""

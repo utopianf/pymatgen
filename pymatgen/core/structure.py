@@ -2321,6 +2321,7 @@ class IStructure(SiteCollection, MSONable):
 
         from pymatgen.io.lmto import LMTOCtrl
         from pymatgen.io.vasp import Vasprun, Chgcar
+        from pymatgen.io.pwscf import PWInput, PWOutput
         from pymatgen.io.exciting import ExcitingInput
         fname = os.path.basename(filename)
         with zopen(filename, "rt") as f:
@@ -2362,6 +2363,10 @@ class IStructure(SiteCollection, MSONable):
                                 merge_tol=merge_tol)
         elif fnmatch(fname, "CTRL*"):
             return LMTOCtrl.from_file(filename=filename).structure
+        elif fnmatch(fname, "pw*.out"):
+            return PWOutput(filename).final_structure
+        elif fnmatch(fname, "pw*.in"):
+            return PWInput.from_file(filename=filename).structure
         else:
             raise ValueError("Unrecognized file extension!")
         if sort:
