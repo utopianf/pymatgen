@@ -13,6 +13,8 @@ from collections import defaultdict
 from monty.io import zopen
 from monty.re import regrep
 
+from numpy import sqrt, array, arccos
+
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.structure import Structure
@@ -300,7 +302,7 @@ class PWInput:
             elif mode[0] == "structure":
                 m_l = re.match(r'(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)', line)
                 m_p = re.match(r'(\w+)\s+(-?\d+\.\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)', line)
-                if m_l:
+                if m_l and (sections["system"]["ibrav"] == 0):
                     lattice += [float(m_l.group(1)), float(m_l.group(2)), float(m_l.group(3))]
                 elif m_p:
                     site_properties["pseudo"].append(pseudo[m_p.group(1)]["pseudopot"])
@@ -314,6 +316,216 @@ class PWInput:
                     coords_are_cartesian = True
                 elif mode[1] == "crystal":
                     coords_are_cartesian = False
+
+        if "celldm(1)" in sections["system"]:
+            alat = 0.529177249 * sections["system"]["celldm(1)"]
+            a = alat
+        elif "A" in sections["system"]:
+            alat = sections["system"]["A"]
+            a = alat
+        else:
+            alat = 1.0
+
+        if "celldm(2)" in sections["system"]:
+            b = alat * sections["system"]["celldm(2)"]
+        elif "B" in sections["system"]:
+            b = sections["system"]["B"]
+
+        if "celldm(3)" in sections["system"]:
+            c = alat * sections["system"]["celldm(3)"]
+        elif "C" in sections["system"]:
+            c = sections["system"]["C"]
+
+        if "celldm(4)" in sections["system"]:
+            cosAB = sections["system"]["celldm(4)"]
+        elif "cosAB" in sections["system"]:
+            cosAB = sections["system"]["cosAB"]
+
+        if "celldm(5)" in sections["system"]:
+            cosAC = sections["system"]["celldm(5)"]
+        elif "cosAC" in sections["system"]:
+            cosAC = sections["system"]["cosAC"]
+
+        if "celldm(6)" in sections["system"]:
+            cosBC = sections["system"]["celldm(6)"]
+        elif "cosBC" in sections["system"]:
+            cosBC = sections["system"]["cosBC"]
+
+        if sections["system"]["ibrav"] == 14:
+            if "celldm(4)" in sections["system"]:
+                cosBC = sections["system"]["celldm(4)"]
+            elif "cosAB" in sections["system"]:
+                cosBC = sections["system"]["cosBC"]
+
+            if "celldm(5)" in sections["system"]:
+                cosAC = sections["system"]["celldm(5)"]
+            elif "cosAC" in sections["system"]:
+                cosAC = sections["system"]["cosAC"]
+
+            if "celldm(6)" in sections["system"]:
+                cosAB = sections["system"]["celldm(6)"]
+            elif "cosAB" in sections["system"]:
+                cosAB = sections["system"]["cosAB"]
+
+        if sections["system"]["ibrav"] == 0:
+            lattice = [l * alat for l in lattice]
+        elif sections["system"]["ibrav"] == 1:
+            # cubic P
+            lattice = array([[1.0, 0.0, 0.0],
+                             [0.0, 1.0, 0.0],
+                             [0.0, 0.0, 1.0]]) * alat
+        elif sections["system"]["ibrav"] == 2:
+            # cubic F
+            lattice = array([[-1.0, 0.0, 1.0],
+                             [ 0.0, 1.0, 1.0],
+                             [-1.0, 1.0, 0.0]]) * alat / 2.0
+        elif sections["system"]["ibrav"] == 3:
+            # cubic I
+            lattice = array([[ 1.0,  1.0,  1.0],
+                             [-1.0,  1.0,  1.0],
+                             [-1.0, -1.0,  1.0]]) * alat / 2.0
+        elif sections["system"]["ibrav"] == -3:
+            # cubic I
+            lattice = array([[-1.0,  1.0,  1.0],
+                             [ 1.0, -1.0,  1.0],
+                             [ 1.0,  1.0, -1.0]]) * alat / 2.0
+        elif sections["system"]["ibrav"] == 4:
+            # Hexagonal and Trigonal P
+            try:
+                lattice = array([[ 1.0,         0.0, 0.0],
+                                 [-0.5, sqrt(3)/2.0, 0.0],
+                                 [ 0.0,         0.0, c/a]]) * alat
+            except NameError:
+                raise PWInputError("No C or celldm(3) parameters.")
+        elif sections["system"]["ibrav"] == 5:
+            # Trigonal R, 3fold axis c
+            tx = sqrt((1.0 - cosAB) / 2.0)
+            ty = sqrt((1.0 - cosAB) / 6.0)
+            tz = sqrt((1.0 + 2 * cosAB) / 3.0)
+            lattice = array([[ tx,  -ty, tz],
+                             [0.0, 2*ty, tz],
+                             [-tx,  -ty, tz]]) * alat
+        elif sections["system"]["ibrav"] == -5:
+            # Trigonal R, 3fold axis <1 1 1>
+            a_ = alat / sqrt(3.0)
+            tx = sqrt((1.0 - cosAB) / 2.0)
+            ty = sqrt((1.0 - cosAB) / 6.0)
+            tz = sqrt((1.0 + 2 * cosAB) / 3.0)
+            u = tz - 2 * sqrt(2.0) * ty
+            v = tz + sqrt(2.0) * ty
+            lattice = array([[u, v, v],
+                             [v, u, v],
+                             [v, v, u]]) * a_
+        elif sections["system"]["ibrav"] == 6:
+            # Tetragonal P
+            try:
+                lattice = array([[1.0, 0.0, 0.0],
+                                 [0.0, 1.0, 0.0],
+                                 [0.0, 0.0, c/a]]) * alat
+            except NameError:
+                raise PWInputError("No C or celldm(3) parameters.")
+        elif sections["system"]["ibrav"] == 7:
+            # Tetragonal I
+            try:
+                lattice = array([[ 1.0, -1.0, c/a],
+                                 [ 1.0,  1.0, c/a],
+                                 [-1.0, -1.0, c/a]]) * alat / 2.0
+            except NameError:
+                raise PWInputError("No C or celldm(3) parameters.")
+        elif sections["system"]["ibrav"] == 8:
+            # Orthorhombic P
+            try:
+                lattice = array([[  a, 0.0, 0.0],
+                                 [0.0,   b, 0.0],
+                                 [0.0, 0.0,   c]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) parameters.")
+        elif sections["system"]["ibrav"] == 9:
+            # Orthorhombic base-centered
+            try:
+                lattice = array([[ a/2.0, b/2.0, 0.0],
+                                 [-a/2.0, b/2.0, 0.0],
+                                 [   0.0,   0.0,   c]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) parameters.")
+        elif sections["system"]["ibrav"] == -9:
+            # Orthorhombic base-centered
+            try:
+                lattice = array([[a/2.0, -b/2.0, 0.0],
+                                 [a/2.0,  b/2.0, 0.0],
+                                 [  0.0,    0.0,   c]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) parameters.")
+        elif sections["system"]["ibrav"] == 91:
+            # Orthorhombic one-face base-centered A-type
+            try:
+                lattice = array([[  a,   0.0,    0.0],
+                                 [0.0, b/2.0, -c/2.0],
+                                 [0.0, b/2.0,  c/2.0]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) parameters.")
+        elif sections["system"]["ibrav"] == 10:
+            # Orthorhombic face-centered
+            try:
+                lattice = array([[a/2.0,   0.0,  c/2.0],
+                                 [a/2.0, b/2.0,    0.0],
+                                 [  0.0, b/2.0,  c/2.0]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) parameters.")
+        elif sections["system"]["ibrav"] == 11:
+            # Orthorhombic body-centered
+            try:
+                lattice = array([[ a/2.0,  b/2.0,  c/2.0],
+                                 [-a/2.0,  b/2.0,  c/2.0],
+                                 [-a/2.0, -b/2.0,  c/2.0]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) parameters.")
+        elif sections["system"]["ibrav"] == 12:
+            # Monoclinic P, unique axis c
+            try:
+                sinAB = sqrt(1.0 - cosAB * cosAB)
+                lattice = array([[      a,     0.0, 0.0],
+                                 [b*cosAB, b*sinAB, 0.0],
+                                 [    0.0,     0.0,   c]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) or cosAB or celldm(4) parameters.")
+        elif sections["system"]["ibrav"] == -12:
+            # Monoclinic P, unique axis b
+            try:
+                sinAC = sqrt(1.0 - cosAC * cosAC)
+                lattice = array([[      a, 0.0,     0.0],
+                                 [    0.0,   b,     0.0],
+                                 [c*cosAC, 0.0, c*sinAC]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) or cosAC or celldm(5) parameters.")
+        elif sections["system"]["ibrav"] == 13:
+            # Monoclinic base-centered, unique axis c
+            try:
+                sinAB = sqrt(1.0 - cosAB * cosAB)
+                lattice = array([[  a/2.0,     0.0, -c/2.0],
+                                 [b*cosAB, b*sinAB,    0.0],
+                                 [  a/2.0,     0.0,  c/2.0]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) or cosAB or celldm(4) parameters.")
+        elif sections["system"]["ibrav"] == -13:
+            # Monoclinic base-centered, unique axis b
+            try:
+                sinAC = sqrt(1.0 - cosAC * cosAC)
+                lattice = array([[  a/2.0, b/2.0,     0.0],
+                                 [ -a/2.0, b/2.0,     0.0],
+                                 [c*cosAC,   0.0, c*sinAC]])
+            except NameError:
+                raise PWInputError("No B or celldm(2) or C or celldm(3) or cosAC or celldm(5) parameters.")
+        elif sections["system"]["ibrav"] == 14:
+            try:
+                sinAB = sqrt(1.0 - cosAB * cosAB)
+                lattice = array([[      a,     0.0, 0.0],
+                                 [b*cosAB, b*sinAB, 0.0],
+                                 [c*cosAC,
+                                  c*(cosBC-cosAC*cosAB)/sinAB,
+                                  c*sqrt(1+2*cosAB*cosAC*cosBC-cosBC*cosBC-cosAC*cosAC-cosAB*cosAB)/sinAB])
+            except NameError:
+                raise PWInputError("No needed cell parameters.")
 
         structure = Structure(Lattice(lattice), species, coords,
                               coords_are_cartesian=coords_are_cartesian,
