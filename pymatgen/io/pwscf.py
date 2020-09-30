@@ -523,7 +523,7 @@ class PWInput:
                                  [b*cosAB, b*sinAB, 0.0],
                                  [c*cosAC,
                                   c*(cosBC-cosAC*cosAB)/sinAB,
-                                  c*sqrt(1+2*cosAB*cosAC*cosBC-cosBC*cosBC-cosAC*cosAC-cosAB*cosAB)/sinAB])
+                                  c*sqrt(1+2*cosAB*cosAC*cosBC-cosBC*cosBC-cosAC*cosAC-cosAB*cosAB)/sinAB]])
             except NameError:
                 raise PWInputError("No needed cell parameters.")
 
@@ -644,17 +644,28 @@ class PWOutput:
         read_final_structure = False
         cell_parameters_pattern = re.compile(r"^\s+(-?[\d\.]+\s+-?[\d\.]+\s+-?[\d\.]+)\s+")
         atomic_positions_pattern = re.compile(r"^([A-Z][a-z]?\s+-?[\d\.]+\s+-?[\d\.]+\s+-?[\d\.]+)\s+")
+        kpointexpr = re.compile(r"\s+k =([-\ ]\d\.\d+)([-\ ]\d\.\d+)([-\ ]\d\.\d+)\ " 
+                                    + r"\(\s+\d+\s+PWs\)\s+bands \(ev\):\s+")
+        occupationexpr = re.compile(r"occupation numbers")
+        fermiexpr = re.compile(r"\s+the Fermi energy is\s+(-?\d+\.\d+) ev\s+")
+        floatexpr = re.compile(r"(-?\d+\.\d+)")
 
         lattice = []
         species = []
         coords = []
+
+        current_kpoint = None
+        read_bands = False
+        read_occupations = False
+        self.data["bands"] = {}
+        self.data["occupations"] = {}
         for i, l in enumerate(gen):
             if l == "Begin final coordinates\n":
                 read_final_structure = True
-            if l == "End final coordinates\n":
+            elif l == "End final coordinates\n":
                 read_final_structure = False
                 break
-            if read_final_structure:
+            elif read_final_structure:
                 m = cell_parameters_pattern.search(l)
                 if m:
                     lattice.append([list(map(float, m.groups()[0].split()))])
@@ -665,6 +676,35 @@ class PWOutput:
                     e, *p = m.groups()[0].split()
                     species.append(e)
                     coords.append(list(map(float, p)))
+            elif kpointexpr.match(l):
+                if current_kpoint is not None:
+                    self.data["bands"][current_kpoint] = list_bands
+                    self.data["occupations"][current_kpoint] = list_occupations
+                m = kpointexpr.match(l)
+                current_kpoint = (float(m.group(1)),
+                                  float(m.group(2)),
+                                  float(m.group(3)))
+                read_bands = True
+                read_occupations = False
+
+                list_bands = []
+                list_occupations = []
+                continue
+            elif l == "     occupation numbers \n":
+                read_bands = False
+                read_occupations = True
+                continue
+            elif fermiexpr.match(l):
+                m = fermiexpr.match(l)
+                self.data["fermi energy"] = float(m.group(1))
+                self.data["bands"][current_kpoint] = list_bands
+                self.data["occupations"][current_kpoint] = list_occupations
+                read_occupations = False
+            elif read_bands:
+                list_bands += list(map(float, l.split()))
+            elif read_occupations:
+                list_occupations += list(map(float, l.split()))
+
         try:
             gen.close()
         except Exception:
