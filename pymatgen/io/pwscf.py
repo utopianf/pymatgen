@@ -755,9 +755,8 @@ class PWOutput:
         atomic_positions_pattern = re.compile(r"^([A-Z][a-z]?\s+-?[\d\.]+\s+-?[\d\.]+\s+-?[\d\.]+)\s+")
         kpointexpr = re.compile(r"\s+k =([-\ ]\d\.\d+)([-\ ]\d\.\d+)([-\ ]\d\.\d+)\ "
                                     + r"\(\s+\d+\s+PWs\)\s+bands \(ev\):\s+")
-        occupationexpr = re.compile(r"occupation numbers")
         fermiexpr = re.compile(r"\s+the Fermi energy is\s+(-?\d+\.\d+) ev\s+")
-        floatexpr = re.compile(r"(-?\d+\.\d+)")
+        hlevelexpr = re.compile(r"\s+highest occupied level \(ev\):\s+(-?\d+\.\d+)")
 
         lattice = []
         species = []
@@ -803,12 +802,20 @@ class PWOutput:
                 read_bands = False
                 read_occupations = True
                 continue
+            # Stop reading occupations
             elif fermiexpr.match(l):
                 m = fermiexpr.match(l)
                 self.data["fermi energy"] = float(m.group(1))
                 self.data["bands"][current_kpoint] = list_bands
                 self.data["occupations"][current_kpoint] = list_occupations
+                read_bands = False
                 read_occupations = False
+            elif hlevelexpr.match(l):
+                self.data["bands"][current_kpoint] = list_bands
+                self.data["occupations"][current_kpoint] = list_occupations
+                read_bands = False
+                read_occupations = False
+
             elif read_bands:
                 list_bands += list(map(float, l.split()))
             elif read_occupations:
