@@ -2427,6 +2427,7 @@ class IStructure(SiteCollection, MSONable):
         from pymatgen.io.exciting import ExcitingInput
         from pymatgen.io.lmto import LMTOCtrl
         from pymatgen.io.vasp import Chgcar, Vasprun
+        from pymatgen.io.pwscf import PWInput, PWOutput
 
         fname = os.path.basename(filename)
         with zopen(filename, "rt") as f:

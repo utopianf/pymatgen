@@ -753,7 +753,7 @@ class PWOutput:
         read_final_structure = False
         cell_parameters_pattern = re.compile(r"^\s+(-?[\d\.]+\s+-?[\d\.]+\s+-?[\d\.]+)\s+")
         atomic_positions_pattern = re.compile(r"^([A-Z][a-z]?\s+-?[\d\.]+\s+-?[\d\.]+\s+-?[\d\.]+)\s+")
-        kpointexpr = re.compile(r"\s+k =([-\ ]\d\.\d+)([-\ ]\d\.\d+)([-\ ]\d\.\d+)\ " 
+        kpointexpr = re.compile(r"\s+k =([-\ ]\d\.\d+)([-\ ]\d\.\d+)([-\ ]\d\.\d+)\ "
                                     + r"\(\s+\d+\s+PWs\)\s+bands \(ev\):\s+")
         occupationexpr = re.compile(r"occupation numbers")
         fermiexpr = re.compile(r"\s+the Fermi energy is\s+(-?\d+\.\d+) ev\s+")
